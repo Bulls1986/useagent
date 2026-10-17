@@ -70,6 +70,12 @@ describe("plain-words schedules and next run", () => {
     expect(cadenceLabel("0 9 * * 7")).toBe("Every Sunday at 9:00 AM");
   });
 
+  test("never turns an invalid expression into words", () => {
+    // Minute 61 would otherwise read as "9:61 AM" on the list rows.
+    expect(cadenceLabel("61 9 * * 2,4")).toBe("61 9 * * 2,4");
+    expect(cadenceLabel("0 25 * * *")).toBe("0 25 * * *");
+  });
+
   test("rejects expressions the scheduler would reject", () => {
     expect(isValidCron("30 8 * * 2,4")).toBe(true);
     expect(isValidCron("0 9 * * 1-5")).toBe(true);
@@ -100,6 +106,35 @@ describe("plain-words schedules and next run", () => {
     // lunchtime there, and the run lands on Monday in UTC terms.
     expect(nextRunAt("0 9 * * 2", "Pacific/Auckland", new Date("2026-10-12T00:00:00Z"))?.toISOString()).toBe("2026-10-12T20:00:00.000Z");
     expect(nextRunLabel("0 9 * * 2", "Pacific/Auckland", new Date("2026-10-12T00:00:00Z"))).toBe("Tuesday at 9:00 AM");
+  });
+
+  test("agrees with the scheduler across the fall-back switch", () => {
+    // New York falls back on Nov 1, 2026: 1:30 happens at 05:30 UTC (EDT)
+    // and again at 06:30 UTC (EST). From 05:45 UTC the second one is next;
+    // from before both, the first one is.
+    expect(nextRunAt("30 1 * * *", "America/New_York", new Date("2026-11-01T05:45:00Z"))?.toISOString()).toBe("2026-11-01T06:30:00.000Z");
+    expect(nextRunAt("30 1 * * *", "America/New_York", new Date("2026-11-01T04:00:00Z"))?.toISOString()).toBe("2026-11-01T05:30:00.000Z");
+    // Berlin falls back on Oct 25, 2026: 2:45 CEST (00:45 UTC) precedes the
+    // repeated 2:00 CET (01:00 UTC), even though 2:00 reads earlier.
+    expect(nextRunAt("0,45 2 * * *", "Europe/Berlin", new Date("2026-10-25T00:30:00Z"))?.toISOString()).toBe("2026-10-25T00:45:00.000Z");
+    // Lord Howe shifts by only 30 minutes: 1:45 on Apr 5, 2026 happens at
+    // 14:45 UTC (+11:00) and again at 15:15 UTC (+10:30) on Apr 4.
+    expect(nextRunAt("45 1 * * *", "Australia/Lord_Howe", new Date("2026-04-04T14:00:00Z"))?.toISOString()).toBe("2026-04-04T14:45:00.000Z");
+  });
+
+  test("skips wall times that never happen at the spring-forward switch", () => {
+    // 2:30 does not exist in New York on Mar 8, 2026; the run is Mar 9.
+    expect(nextRunAt("30 2 * * *", "America/New_York", new Date("2026-03-08T00:00:00Z"))?.toISOString()).toBe("2026-03-09T06:30:00.000Z");
+  });
+
+  test("shows no next run for server-timezone schedules", () => {
+    // A schedule with no timezone runs in the server's local time, which
+    // the browser cannot know; guessing the viewer's zone would disagree
+    // with the scheduler, so there is no label to show.
+    expect(nextRunAt("0 9 * * *", null, new Date("2026-10-13T00:00:00Z"))).toBeNull();
+    expect(nextRunLabel("0 9 * * *", null, new Date("2026-10-13T00:00:00Z"))).toBeNull();
+    // An unknown zone name means server local time on the backend too.
+    expect(nextRunAt("0 9 * * *", "Not/AZone", new Date("2026-10-13T00:00:00Z"))).toBeNull();
   });
 
   test("labels the next run with a day and a time", () => {

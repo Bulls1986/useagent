@@ -29,6 +29,7 @@ type Field = "name" | "prompt" | "cron";
 
 export function RoutineForm({ bot, routine, onSaved, onCancel }: { bot: ApiBot; routine?: ApiRoutine; onSaved: (saved: ApiRoutine) => void; onCancel: () => void }) {
   const promptErrorId = useId();
+  const previewId = useId();
   const nameRef = useRef<HTMLInputElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const cronRef = useRef<HTMLInputElement>(null);
@@ -150,9 +151,16 @@ export function RoutineForm({ bot, routine, onSaved, onCancel }: { bot: ApiBot; 
           isInvalid={Boolean(invalid.cron)}
           hint={invalid.cron ?? (timezone ? `Times in ${timezone}.` : "Times in the server's timezone.")}
           fieldClassName="font-mono"
+          aria-describedby={preview ? previewId : undefined}
         />
         {preview && (
-          <p className={cronValid ? "text-caption-1-regular text-text-tertiary" : "text-caption-1-regular text-text-error-primary"}>{preview}</p>
+          <p
+            id={previewId}
+            aria-live="polite"
+            className={cronValid ? "text-caption-1-regular text-text-tertiary" : "text-caption-1-regular text-text-error-primary"}
+          >
+            {preview}
+          </p>
         )}
       </div>
       {error && (

@@ -115,6 +115,9 @@ function clockLabel(hour: number, minute: number): string {
 export function cadenceLabel(cron: string): string {
   const fields = cron.trim().split(/\s+/);
   if (fields.length !== 5) return cron;
+  // Never verbalize an expression the scheduler would reject: an out-of-range
+  // field (minute 61) would otherwise read as a plausible time ("9:61 AM").
+  if (!isValidCron(cron)) return cron;
   const [minuteField, hourField, day, month, weekday] = fields;
   if (day !== "*" || month !== "*") return cron;
 
@@ -306,18 +309,22 @@ function zonedParts(date: Date, timeZone: string): ZonedParts {
 }
 
 /**
- * The zone a schedule's wall clock lives in: the routine's own zone, or the
- * viewer's zone when the routine carries none (the scheduler falls back to
- * its local zone the same way). An unknown zone also falls back.
+ * The zone a schedule's wall clock lives in, when the browser can know it:
+ * the routine's own zone. A routine with no zone runs in the scheduler's
+ * server-local time (the backend's `cronMatches` does the same), and the
+ * server's zone is not exposed to the frontend, so there is no honest zone
+ * to resolve to; substituting the viewer's zone would quietly disagree
+ * with the server. An unknown zone name lands in the same place, because
+ * the backend falls back to server local time for it. Null therefore means
+ * no next run can be computed here.
  */
-function resolveZone(timezone: string | null): string {
-  const fallback = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  if (!timezone) return fallback;
+function resolveZone(timezone: string | null): string | null {
+  if (!timezone) return null;
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: timezone });
     return timezone;
   } catch {
-    return fallback;
+    return null;
   }
 }
 
@@ -345,26 +352,69 @@ function zoneOffsetMs(instant: number, timeZone: string): number {
   return asUtc - Math.floor(instant / 1000) * 1000;
 }
 
-/** The UTC instant of a wall-clock time in `timeZone`. */
-function zonedTimeToUtc(year: number, month: number, day: number, hour: number, minute: number, timeZone: string): number {
+/**
+ * Every UTC instant whose wall clock in `timeZone` reads the given time:
+ * exactly one normally, two when the time repeats at a fall-back switch,
+ * none when it is skipped at a spring-forward switch. A single fixed-point
+ * conversion can only ever land on one occurrence, and which one depends
+ * on the offset beside the switch (and on the shift being one hour, which
+ * Lord Howe's 30-minute shift is not). So sample the offsets in effect
+ * around the time - real zones run from -12h to +14h, and a switch beside
+ * this wall time sits inside that span - and keep the instants that read
+ * back as the requested time.
+ */
+function zonedTimeOccurrences(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  timeZone: string,
+): number[] {
   const guess = Date.UTC(year, month - 1, day, hour, minute);
-  let utc = guess - zoneOffsetMs(guess, timeZone);
-  // The offset can change between the guess and the answer (DST switch);
-  // one correction lands on the right instant for real zones.
-  const corrected = guess - zoneOffsetMs(utc, timeZone);
-  if (corrected !== utc) utc = corrected;
-  return utc;
+  const offsets = new Set<number>();
+  for (let probe = guess - 54_000_000; probe <= guess + 54_000_000; probe += 10_800_000) {
+    offsets.add(zoneOffsetMs(probe, timeZone));
+  }
+  const occurrences: number[] = [];
+  for (const offset of offsets) {
+    const utc = guess - offset;
+    const wc = zonedParts(new Date(utc), timeZone);
+    if (
+      wc.year === year &&
+      wc.month === month &&
+      wc.day === day &&
+      wc.hour === hour &&
+      wc.minute === minute &&
+      !occurrences.includes(utc)
+    ) {
+      occurrences.push(utc);
+    }
+  }
+  return occurrences.sort((a, b) => a - b);
 }
+
+/**
+ * Next-run results by (cron, zone, start minute). Rows re-render on a
+ * timer and the form re-renders per keystroke; without this, an
+ * every-minute schedule rescans on every render. An entry is keyed on the
+ * truncated start minute, so it is only ever reused inside the minute it
+ * was computed for.
+ */
+const nextRunCache = new Map<string, Date | null>();
 
 /**
  * The next instant `cron` fires at or after the current minute, following
  * the scheduler's own rules in the schedule's timezone; null when the
- * expression is invalid or never fires within four years (February 30).
+ * expression is invalid, when the schedule runs in the server's timezone
+ * (which the browser cannot know), or when it never fires within four
+ * years (February 30).
  */
 export function nextRunAt(cron: string, timezone: string | null, from: Date = new Date()): Date | null {
   const parsed = parseCron(cron);
   if (!parsed) return null;
   const zone = resolveZone(timezone);
+  if (!zone) return null;
 
   // The scheduler ticks on minute marks; the next run is the first matching
   // mark, counting the current minute when `from` sits exactly on it.
@@ -373,13 +423,27 @@ export function nextRunAt(cron: string, timezone: string | null, from: Date = ne
   if (start.getTime() < from.getTime()) start = new Date(start.getTime() + 60_000);
   const startMs = start.getTime();
 
+  const key = `${cron}\n${zone}\n${startMs}`;
+  const cached = nextRunCache.get(key);
+  if (cached !== undefined) return cached ? new Date(cached.getTime()) : null;
+
+  const result = scanNextRun(parsed, zone, startMs);
+  if (nextRunCache.size >= 256) nextRunCache.clear();
+  nextRunCache.set(key, result ? new Date(result.getTime()) : null);
+  return result;
+}
+
+/** The day-by-day scan behind `nextRunAt`, uncached. */
+function scanNextRun(parsed: ParsedCron, zone: string, startMs: number): Date | null {
   const hours = [...parsed.hour].sort((a, b) => a - b);
   const minutes = [...parsed.minute].sort((a, b) => a - b);
 
-  const first = zonedParts(start, zone);
-  let cursor = Date.UTC(first.year, first.month - 1, first.day);
+  const first = zonedParts(new Date(startMs), zone);
+  // Start one wall day early: a fall-back switch at midnight reads as the
+  // previous day again, so the next run can carry yesterday's date there.
+  let cursor = Date.UTC(first.year, first.month - 1, first.day) - 86_400_000;
   // Four years of days covers the longest real gap (February 29).
-  for (let dayOffset = 0; dayOffset <= 1466; dayOffset++) {
+  for (let dayOffset = 0; dayOffset <= 1467; dayOffset++) {
     const date = new Date(cursor);
     const year = date.getUTCFullYear();
     const month = date.getUTCMonth() + 1;
@@ -391,24 +455,27 @@ export function nextRunAt(cron: string, timezone: string | null, from: Date = ne
       const dowMatch = parsed.dow.has(weekday);
       const dayMatches = parsed.domRestricted && parsed.dowRestricted ? domMatch || dowMatch : domMatch && dowMatch;
       if (dayMatches) {
+        // The day's earliest instant wins, not the first in wall order:
+        // beside a fall-back switch a later wall time can hold the earlier
+        // instant (Berlin 2:45 CEST precedes the repeated 2:00 CET).
+        let earliest: number | null = null;
         for (const hour of hours) {
           for (const minute of minutes) {
-            let candidate = zonedTimeToUtc(year, month, day, hour, minute, zone);
-            if (candidate < startMs) continue;
-            // A wall time in the fall-back hour happens twice; the earlier
-            // occurrence is the one that comes next.
-            const earlier = candidate - 3_600_000;
-            if (earlier >= startMs) {
-              const earlierParts = zonedParts(new Date(earlier), zone);
-              if (earlierParts.hour === hour && earlierParts.minute === minute && cronMatchesAt(parsed, new Date(earlier), zone)) {
-                candidate = earlier;
+            const guess = Date.UTC(year, month - 1, day, hour, minute);
+            // A wall time whose latest possible occurrence (zones run from
+            // -12h to +14h) is already past cannot be next; skip it without
+            // resolving its occurrences.
+            if (guess + 43_200_000 < startMs) continue;
+            for (const candidate of zonedTimeOccurrences(year, month, day, hour, minute, zone)) {
+              if (candidate < startMs) continue;
+              if (earliest !== null && candidate >= earliest) continue;
+              if (cronMatchesAt(parsed, new Date(candidate), zone)) {
+                earliest = candidate;
               }
-            }
-            if (cronMatchesAt(parsed, new Date(candidate), zone)) {
-              return new Date(candidate);
             }
           }
         }
+        if (earliest !== null) return new Date(earliest);
       }
     }
     cursor += 86_400_000;
@@ -420,7 +487,9 @@ export function nextRunAt(cron: string, timezone: string | null, from: Date = ne
 export function nextRunLabel(cron: string, timezone: string | null, from: Date = new Date()): string | null {
   const at = nextRunAt(cron, timezone, from);
   if (!at) return null;
-  const wc = zonedParts(at, resolveZone(timezone));
+  const zone = resolveZone(timezone);
+  if (!zone) return null;
+  const wc = zonedParts(at, zone);
   return `${WEEKDAY_NAMES[wc.weekday]} at ${clockLabel(wc.hour, wc.minute)}`;
 }
 
