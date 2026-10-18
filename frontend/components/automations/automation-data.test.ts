@@ -5,8 +5,7 @@ import {
   cadenceLabel,
   engineLabel,
   isValidCron,
-  nextRunAt,
-  nextRunLabel,
+  nextRunLabelAt,
   reconcileAutomationEngine,
   scheduleZone,
 } from "@/app/agent/schedules/schedules-data";
@@ -87,67 +86,21 @@ describe("plain-words schedules and next run", () => {
     expect(isValidCron("")).toBe(false);
   });
 
-  test("finds the next run for custom schedules", () => {
-    // Tuesdays and Thursdays at 8:30; from Monday midnight, Tuesday is next.
-    expect(nextRunAt("30 8 * * 2,4", "UTC", new Date("2026-10-12T00:00:00Z"))?.toISOString()).toBe("2026-10-13T08:30:00.000Z");
-    // Every 30 minutes.
-    expect(nextRunAt("*/30 * * * *", "UTC", new Date("2026-10-13T10:07:00Z"))?.toISOString()).toBe("2026-10-13T10:30:00.000Z");
-    // Weekdays at 9:00; Friday's run has already gone, so Monday is next.
-    expect(nextRunAt("0 9 * * 1-5", "UTC", new Date("2026-10-16T10:00:00Z"))?.toISOString()).toBe("2026-10-19T09:00:00.000Z");
-    // Day-of-month OR day-of-week, like the scheduler: the 15th beats Monday.
-    expect(nextRunAt("0 0 15 * 1", "UTC", new Date("2026-10-14T00:00:00Z"))?.toISOString()).toBe("2026-10-15T00:00:00.000Z");
+  test("renders the next run the server names, in the schedule's zone", () => {
+    // 13:00 UTC is 9:00 in New York in October, on a Tuesday.
+    expect(nextRunLabelAt("2026-10-13T13:00:00.000Z", "America/New_York")).toBe("Tuesday at 9:00 AM");
+    // The same instant is already Wednesday in Auckland.
+    expect(nextRunLabelAt("2026-10-13T13:00:00.000Z", "Pacific/Auckland")).toBe("Wednesday at 2:00 AM");
+    // A fall-back instant the server picks renders at its own wall time.
+    expect(nextRunLabelAt("2026-11-01T06:30:00.000Z", "America/New_York")).toBe("Sunday at 1:30 AM");
   });
 
-  test("honours the routine's timezone, including which day it is there", () => {
-    // 9:00 in New York is 13:00 UTC in October; from 12:00 UTC it is today.
-    expect(nextRunAt("0 9 * * *", "America/New_York", new Date("2026-10-13T12:00:00Z"))?.toISOString()).toBe("2026-10-13T13:00:00.000Z");
-    expect(nextRunLabel("0 9 * * *", "America/New_York", new Date("2026-10-13T12:00:00Z"))).toBe("Tuesday at 9:00 AM");
-    // Tuesdays 9:00 in Auckland: from Monday 00:00 UTC it is already Monday
-    // lunchtime there, and the run lands on Monday in UTC terms.
-    expect(nextRunAt("0 9 * * 2", "Pacific/Auckland", new Date("2026-10-12T00:00:00Z"))?.toISOString()).toBe("2026-10-12T20:00:00.000Z");
-    expect(nextRunLabel("0 9 * * 2", "Pacific/Auckland", new Date("2026-10-12T00:00:00Z"))).toBe("Tuesday at 9:00 AM");
-  });
-
-  test("agrees with the scheduler across the fall-back switch", () => {
-    // New York falls back on Nov 1, 2026: 1:30 happens at 05:30 UTC (EDT)
-    // and again at 06:30 UTC (EST). From 05:45 UTC the second one is next;
-    // from before both, the first one is.
-    expect(nextRunAt("30 1 * * *", "America/New_York", new Date("2026-11-01T05:45:00Z"))?.toISOString()).toBe("2026-11-01T06:30:00.000Z");
-    expect(nextRunAt("30 1 * * *", "America/New_York", new Date("2026-11-01T04:00:00Z"))?.toISOString()).toBe("2026-11-01T05:30:00.000Z");
-    // Berlin falls back on Oct 25, 2026: 2:45 CEST (00:45 UTC) precedes the
-    // repeated 2:00 CET (01:00 UTC), even though 2:00 reads earlier.
-    expect(nextRunAt("0,45 2 * * *", "Europe/Berlin", new Date("2026-10-25T00:30:00Z"))?.toISOString()).toBe("2026-10-25T00:45:00.000Z");
-    // Lord Howe shifts by only 30 minutes: 1:45 on Apr 5, 2026 happens at
-    // 14:45 UTC (+11:00) and again at 15:15 UTC (+10:30) on Apr 4.
-    expect(nextRunAt("45 1 * * *", "Australia/Lord_Howe", new Date("2026-04-04T14:00:00Z"))?.toISOString()).toBe("2026-04-04T14:45:00.000Z");
-  });
-
-  test("skips wall times that never happen at the spring-forward switch", () => {
-    // 2:30 does not exist in New York on Mar 8, 2026; the run is Mar 9.
-    expect(nextRunAt("30 2 * * *", "America/New_York", new Date("2026-03-08T00:00:00Z"))?.toISOString()).toBe("2026-03-09T06:30:00.000Z");
-  });
-
-  test("shows no next run for server-timezone schedules", () => {
-    // A schedule with no timezone runs in the server's local time, which
-    // the browser cannot know; guessing the viewer's zone would disagree
-    // with the scheduler, so there is no label to show.
-    expect(nextRunAt("0 9 * * *", null, new Date("2026-10-13T00:00:00Z"))).toBeNull();
-    expect(nextRunLabel("0 9 * * *", null, new Date("2026-10-13T00:00:00Z"))).toBeNull();
-    // An unknown zone name means server local time on the backend too.
-    expect(nextRunAt("0 9 * * *", "Not/AZone", new Date("2026-10-13T00:00:00Z"))).toBeNull();
-  });
-
-  test("labels the next run with a day and a time", () => {
-    expect(nextRunLabel("0 9 * * *", "UTC", new Date("2026-10-13T00:00:00Z"))).toBe("Tuesday at 9:00 AM");
-    expect(nextRunLabel("30 8 * * 2,4", "UTC", new Date("2026-10-12T00:00:00Z"))).toBe("Tuesday at 8:30 AM");
-  });
-
-  test("has no next run to show for invalid or impossible expressions", () => {
-    expect(nextRunAt("0 9 * *", "UTC", new Date("2026-10-13T00:00:00Z"))).toBeNull();
-    expect(nextRunLabel("0 9 * *", "UTC", new Date("2026-10-13T00:00:00Z"))).toBeNull();
-    // February 30 never fires.
-    expect(nextRunAt("0 0 30 2 *", "UTC", new Date("2026-10-13T00:00:00Z"))).toBeNull();
-    // But February 29 does, given a long enough look ahead.
-    expect(nextRunAt("0 12 29 2 *", "UTC", new Date("2027-03-01T00:00:00Z"))?.toISOString()).toBe("2028-02-29T12:00:00.000Z");
+  test("shows no next run when the server names none", () => {
+    // Paused, or a cron that names no date: the server answers null.
+    expect(nextRunLabelAt(null, "UTC")).toBeNull();
+    // No zone to render the instant in.
+    expect(nextRunLabelAt("2026-10-13T13:00:00.000Z", null)).toBeNull();
+    expect(nextRunLabelAt("2026-10-13T13:00:00.000Z", "Not/AZone")).toBeNull();
+    expect(nextRunLabelAt("not a date", "UTC")).toBeNull();
   });
 });

@@ -1,7 +1,8 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
-import { cadenceLabel, isValidCron, nextRunLabel } from "@/app/agent/schedules/schedules-data";
+import { useEffect, useId, useRef, useState } from "react";
+import { fetchSchedulePreview } from "@/app/agent/schedules/schedules-api";
+import { cadenceLabel, isValidCron, nextRunLabelAt } from "@/app/agent/schedules/schedules-data";
 import { Button } from "@/components/base/buttons/button";
 import { Input } from "@/components/base/input/input";
 import * as Textarea from "@/components/base/textarea/textarea";
@@ -40,12 +41,37 @@ export function RoutineForm({ bot, routine, onSaved, onCancel }: { bot: ApiBot; 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const timezone = routine ? routine.timezone : browserTimezone();
+  /** The zone the preview runs in: a create that names none runs in UTC, as the server does. */
+  const previewZone = timezone ?? "UTC";
+  const [nextRunAt, setNextRunAt] = useState<string | null>(null);
 
   /** Live read of the cron field: the schedule in words and when it fires next. */
   const cronText = cron.trim();
   const cronValid = cronText.length > 0 && isValidCron(cronText);
   const words = cronValid && cadenceLabel(cronText) !== cronText ? cadenceLabel(cronText) : null;
-  const nextRun = cronValid ? nextRunLabel(cronText, timezone) : null;
+
+  // The next run comes from the scheduler itself, debounced while typing;
+  // a failed or empty answer shows no next run rather than a guessed one.
+  useEffect(() => {
+    if (!cronValid) {
+      setNextRunAt(null);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void fetchSchedulePreview(cronText, previewZone, controller.signal)
+        .then((runs) => setNextRunAt(runs[0] ?? null))
+        .catch(() => {
+          if (!controller.signal.aborted) setNextRunAt(null);
+        });
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [cronText, cronValid, previewZone]);
+
+  const nextRun = nextRunLabelAt(nextRunAt, previewZone);
   const preview =
     cronText.length === 0
       ? null
@@ -149,7 +175,7 @@ export function RoutineForm({ bot, routine, onSaved, onCancel }: { bot: ApiBot; 
             clear("cron");
           }}
           isInvalid={Boolean(invalid.cron)}
-          hint={invalid.cron ?? (timezone ? `Times in ${timezone}.` : "Times in the server's timezone.")}
+          hint={invalid.cron ?? `Times in ${previewZone}.`}
           fieldClassName="font-mono"
           aria-describedby={preview ? previewId : undefined}
         />
