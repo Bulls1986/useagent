@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { SandboxHandle, SandboxExecuteResult } from "../sandboxes/provider";
@@ -26,6 +26,7 @@ import {
   prewarmCodexServices,
   previewWebSocketUrl,
 } from "./codex-subscription-runtime";
+import { buildSandboxListenerProbeCommand, LISTENER_FOREIGN, LISTENER_STALE } from "./sandbox-listener-probe";
 import { SANDBOX_NAME_PREFIX } from "../sandboxes/sandbox-names";
 
 const priorGatewayUrl = process.env.PROVIDER_GATEWAY_PUBLIC_URL;
@@ -496,6 +497,57 @@ describe("T3 Codex subscription lease", () => {
     expect(await probe({ exe: native, args: ["codex", "app-server", "--listen", "ws://0.0.0.0:37734"] })).toBe(2);
   });
 
+  test("reads our exec-server left on a replaced Codex as stale, and stops only that process", async () => {
+    // A Codex reinstall (an engine bump) unlinks the binary a running exec-server
+    // started from, so /proc names it "<path> (deleted)". It is still ours: it is
+    // stopped and started again instead of refusing the port as another process's.
+    const home = await mkdtemp(join(tmpdir(), "useagent-exec-stale-"));
+    const layout = { home, workdir: `${home}/work`, runsAsRoot: false, bunExecutable: "/usr/local/bin/bun" };
+    const nativeDir = `${home}/.local/share/useagent/native-engines/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin`;
+    await mkdir(nativeDir, { recursive: true });
+    const replaced = `${await realpath(nativeDir)}/codex (deleted)`;
+    const elsewhere = `${await realpath(home)}/codex (deleted)`;
+    const listening = ["codex", "exec-server", "--listen", "ws://0.0.0.0:37734", "--environment-id", `${SANDBOX_NAME_PREFIX}-run-1`];
+    const procRoot = async (pid: number, exe: string, args: readonly string[]) => {
+      const proc = await mkdtemp(join(home, "proc-"));
+      await mkdir(join(proc, "net"));
+      await writeFile(join(proc, "net/tcp"),
+        "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n" +
+        "   0: 00000000:9366 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 4242 1 0 100 0 0 10 0\n");
+      await mkdir(join(proc, `${pid}/fd`), { recursive: true });
+      await symlink("socket:[4242]", join(proc, `${pid}/fd/3`));
+      await symlink(exe, join(proc, `${pid}/exe`));
+      await writeFile(join(proc, `${pid}/cmdline`), `${args.join("\0")}\0`);
+      return proc;
+    };
+    const verdicts = async (command: string, pid: number, exe: string, args: readonly string[]) => {
+      const run = spawnSync("sh", ["-c", `${command} ${await procRoot(pid, exe, args)}`]);
+      return JSON.parse(String(run.stdout).trim().split("\n").at(-1) ?? "null") as Record<string, number>;
+    };
+    const read = buildCodexExecServerReadinessCommand(0, layout);
+
+    expect(await verdicts(read, 77, replaced, listening)).toEqual({ 37734: LISTENER_STALE });
+    expect(await verdicts(read, 77, elsewhere, listening)).toEqual({ 37734: LISTENER_FOREIGN });
+    expect(await verdicts(read, 77, replaced, ["codex", "app-server", "--listen", "ws://0.0.0.0:37734"]))
+      .toEqual({ 37734: LISTENER_FOREIGN });
+
+    // Stopping kills the stale holder (a real process here) and never a foreign one.
+    const stop = buildSandboxListenerProbeCommand([codexExecServerOwner(layout)], 300, { stopStale: true });
+    const stale = Bun.spawn(["sleep", "30"]);
+    const foreign = Bun.spawn(["sleep", "30"]);
+    try {
+      await verdicts(stop, stale.pid, replaced, listening);
+      await verdicts(stop, foreign.pid, elsewhere, listening);
+      expect(await Promise.race([stale.exited.then(() => true), Bun.sleep(5_000).then(() => false)])).toBe(true);
+      expect(stale.signalCode).toBe("SIGKILL");
+      expect(foreign.exitCode).toBeNull();
+      expect(foreign.signalCode).toBeNull();
+    } finally {
+      stale.kill();
+      foreign.kill();
+    }
+  });
+
   test("points the app-server's code mode at the sandbox host through this run's bearer", async () => {
     const harness = fakeSandbox({ execServerListening: true });
     const relays = relaySessions();
@@ -528,6 +580,35 @@ describe("T3 Codex subscription lease", () => {
     expect(harness.commands[0]?.command).toContain(digest);
     expect(harness.commands[0]?.command).not.toContain(bearers[0]!);
 
+    await lease.close();
+  });
+
+  test("stops an exec-server left on a replaced Codex, then starts it again", async () => {
+    // After an engine bump the sandbox's earlier exec-server still holds its port,
+    // running the unlinked binary; the turn must not fail on it, now or later.
+    const harness = fakeSandbox({ execServerStale: true, codeModeListening: true });
+    const relays = relaySessions();
+
+    const lease = await prepareCodexSubscription({
+      sandbox: harness.sandbox,
+      ctx: context(),
+      workdir: "/root/work",
+      runtime: runtime(),
+      dependencies: {
+        loadThreadBinding: async () => null,
+        openExecBridge: () => ({ url: "ws://127.0.0.1:43111/grant", close() {} }),
+        openCodeModeBridge: codeModeBridges(),
+        openRelaySession: relays.open,
+      },
+    });
+
+    const commands = harness.commands.map(({ command }) => command);
+    const stopAt = commands.findIndex((command) => command.includes("const stop=true;"));
+    expect(stopAt).toBeGreaterThan(0);
+    expect(commands.findIndex((command) => command.includes("const deadline=Date.now()+15000;"))).toBeGreaterThan(stopAt);
+    expect(harness.createdSessions).toEqual([`${SANDBOX_NAME_PREFIX}-codex-exec-server`]);
+    expect(harness.sessionCommands.map(({ command }) => command).join("\n")).toContain("exec-server --listen");
+    expect(relays.opened).toHaveLength(1);
     await lease.close();
   });
 
@@ -812,6 +893,8 @@ function runtime(): CodexSubscriptionRuntimeSelection {
 function fakeSandbox(options: {
   execServerListening?: boolean;
   execServerPortForeign?: boolean;
+  /** The exec-server port is held by ours on a replaced Codex until a stop probe kills it. */
+  execServerStale?: boolean;
   codeModeListening?: boolean;
   failProviderPatch?: boolean;
   launchExit?: number;
@@ -830,14 +913,17 @@ function fakeSandbox(options: {
     process: {
       async executeCommand(command: string) {
         const providerPatch = command.includes("CODEX_INSTANCE_B64");
-        const quickProbe = command.includes("const deadline=Date.now()+0;");
-        const readinessProbe = command.includes("const deadline=Date.now()+15000;");
-        if (quickProbe || readinessProbe) {
+        const stopProbe = command.includes("const stop=true;");
+        const quickProbe = !stopProbe && command.includes("const deadline=Date.now()+0;");
+        const readinessProbe = !stopProbe && command.includes("const deadline=Date.now()+15000;");
+        if (quickProbe || readinessProbe || stopProbe) {
           const owners = JSON.parse(Buffer.from(command.trim().split(" ").at(-1) ?? "", "base64").toString("utf8")) as Array<{ port: number }>;
           const verdicts = Object.fromEntries(owners.map(({ port }) => [port, readinessProbe
             ? 0
             : port === 37_734
-              ? options.execServerPortForeign ? 2 : options.execServerListening ? 0 : 1
+              ? options.execServerPortForeign ? 2
+                : options.execServerStale ? stopProbe ? 1 : 3
+                : options.execServerListening ? 0 : 1
               : options.codeModeListening ? 0 : 1]));
           const values = Object.values(verdicts);
           const result = { exitCode: values.includes(2) ? 2 : values.every((v) => v === 0) ? 0 : 1, result: JSON.stringify(verdicts) };

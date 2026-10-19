@@ -32,6 +32,7 @@ import {
   buildSandboxListenerProbeCommand,
   LISTENER_FOREIGN,
   LISTENER_OURS,
+  LISTENER_STALE,
   readListenerVerdicts,
   type SandboxListenerOwner,
 } from "./sandbox-listener-probe";
@@ -302,14 +303,18 @@ export async function prepareCodexSubscription(input: {
 }
 
 /** Start whichever Codex services the probe found missing, then wait until our
- * own processes hold all three ports. */
+ * own processes hold all three ports. Ours still running a Codex a later install
+ * replaced (stale) are stopped first: they hold their ports until killed. */
 async function launchMissingCodexServices(
   sandbox: SandboxHandle,
   layout: SandboxRuntimeLayout,
-  verdicts: NonNullable<ReturnType<typeof readListenerVerdicts>>,
+  probed: NonNullable<ReturnType<typeof readListenerVerdicts>>,
 ): Promise<void> {
   const owners = codexServiceOwners(layout);
-  if (owners.every(({ port }) => verdicts[port] === LISTENER_OURS)) return;
+  if (owners.every(({ port }) => probed[port] === LISTENER_OURS)) return;
+  const verdicts = Object.values(probed).includes(LISTENER_STALE)
+    ? await stopStaleCodexServices(sandbox, owners)
+    : probed;
   if (verdicts[CODEX_EXEC_SERVER_PORT] !== LISTENER_OURS) {
     await sandbox.process.deleteSession(CODEX_EXEC_SERVER_SESSION).catch(() => {});
     await sandbox.process.createSession(CODEX_EXEC_SERVER_SESSION);
@@ -347,6 +352,25 @@ async function launchMissingCodexServices(
   if (owners.some(({ port }) => ready[port] !== LISTENER_OURS)) {
     throw new Error("Codex sandbox services failed readiness");
   }
+}
+
+/** Kill our own Codex services left on a replaced executable (and nothing else),
+ * then the ports' verdicts once none is stale. */
+async function stopStaleCodexServices(
+  sandbox: SandboxHandle,
+  owners: readonly SandboxListenerOwner[],
+): Promise<NonNullable<ReturnType<typeof readListenerVerdicts>>> {
+  const stopped = await sandbox.process.executeCommand(
+    buildSandboxListenerProbeCommand(owners, 5_000, { stopStale: true }),
+    undefined,
+    undefined,
+    15,
+  ).catch(() => null);
+  const verdicts = assertNoForeignListener(readListenerVerdicts(stopped?.result ?? "", owners));
+  if (Object.values(verdicts).includes(LISTENER_STALE)) {
+    throw new Error("Codex sandbox services left on a replaced Codex could not be stopped");
+  }
+  return verdicts;
 }
 
 /** A warm-pool sandbox starts the Codex services before any run claims it, so
