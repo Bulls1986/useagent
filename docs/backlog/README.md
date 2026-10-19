@@ -4,7 +4,7 @@
 > 最后整理：**2026-10-19**；仓库：`Bulls1986/useagent`。  
 > **本次只记录规划**：不修改业务代码、不调整运行配置、不启动开发。以下状态以当前讨论记录为基础，并非对最新部署的正式复验。
 
-## 待办全量清单（14 项）
+## 待办全量清单（15 项）
 
 | ID | 类别 | 待办事项 / 详情文档 | 优先级 | 状态 | 当前下一步 |
 | --- | --- | --- | --- | --- | --- |
@@ -20,10 +20,15 @@
 | **UA-BL-10** | Learning 正确性 | [候选识别、成功证据与操作步骤提取质量](./learning-evidence-quality.md) | **P1** | Backlog | 审核真实验证证据、Step/Artifact 判定与失败/裁剪边界 |
 | **UA-BL-11** | Learning 发现 | [多语言相似任务聚类与中文技能匹配](./learning-multilingual-clustering.md) | **P1** | Backlog | 中文/混合语义匹配基线，降低误合并与漏召回 |
 | **UA-BL-12** | Learning 审核发布 | [提案组装、双级审核、产物追溯与可靠发布](./learning-proposal-publish-traceability.md) | **P1** | Backlog | 提升提案质量，修复丢失回执、失败补偿和来源追溯 |
+| **UA-BL-13** | 企业 AI 门户 / Work | [LibreChat Chat + UseAgent Work/Cowork 增量集成主线](./enterprise-portal-work-mode-integration.md) | **产品主线 / 待排期** | Backlog | 先验证 Work 单独闭环及两侧身份集成边界，分阶段接入门户 |
 | **UA-BUG-01** | 性能 / MCP | [`workpiece_create` 失败频繁、重试拖慢任务](./workpiece-create-failures.md) | 待按复现评估 | **Open investigation** | 当前版本重放日志、复现分类与最小修复 |
 | **UA-BUG-02** | Local Runner | [Docker Runner 闲置停止/恢复/删除/磁盘释放及真实执行闭环](./local-docker-runner-lifecycle.md) | 真实 E2E 优先 | **待复验** | 复测回收与历史 bwrap/Shell 问题，再定 GC/TTL |
 
-**汇总**：12 项功能/能力与安全验收（UA-BL-01～12）+ 2 项待排查/复验的历史缺陷（UA-BUG-01～02）。全数均尚未在这份 Backlog 中标记完成；**不等于代码当前必然未实现**。实施前需用最新 Head、测试和部署证据重新判定。
+**汇总**：13 项功能/能力与安全验收（UA-BL-01～13）+ 2 项待排查/复验的历史缺陷（UA-BUG-01～02）。全数均尚未在这份 Backlog 中标记完成；**不等于代码当前必然未实现**。实施前需用最新 Head、测试和部署证据重新判定。
+
+## 产品集成主线（2026-10-19）
+
+**[UA-BL-13：企业 AI 门户增量 Work / Cowork 模式](./enterprise-portal-work-mode-integration.md)**：已有 **LibreChat 继续承担 Chat**，**UseAgent 原生 CLI Runtime 作为 Work 执行底座**。先让 UseAgent Work 单独可用，逐步实现统一身份/入口、Chat → Work 显式任务交接，再考虑进度/成果回流与 UI 融合。以低改造量、原生 Agent Session/沙箱隔离和企业权限治理为边界；内部能力缺口复用 UA-BL-01～12 与 UA-BUG-01～02，不另造相同待办。本轮只登记目标和实施阶段，不启动代码开发。
 
 ## 本轮新增系列任务（2026-10-19）
 
@@ -31,6 +36,7 @@ UA-BL-09～12 为同一系列的分项待办：用户侧统一 Skill/Playbook �
 
 ## 已冻结的共同决策
 
+- **企业门户定位**：LibreChat = Chat，UseAgent = Work/Cowork 增量执行模式；统一入口与企业身份，保留双方自身会话/执行边界，不强制重建门户。
 - **原生 Agent Runtime**：每任务/会话在独立 Sandbox 运行完整 CLI Runtime；UseAgent 管理输入输出、调度、权限、事件、会话映射与生命周期；**不重写 Agent Loop**。
 - **Local vs Cube**：Windows Local Docker Runner 是现阶段本地验证路线；CubeSandbox 是后续在适合宿主环境的真实兼容目标。不能静默回退 Daytona 或擅自切换当前沙箱。
 - **插件化**：能用 Provider/Adapter/Storage/Skill Registry 扩展的，不做多处硬编码特判；不为了一个功能搭建通用插件市场。
