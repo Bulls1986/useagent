@@ -52,9 +52,17 @@ function relaySessions(log: string[] = []) {
     runs: CodexRelayRun[];
     serving: CodexRelayRun | null;
     closed: boolean;
+    /** Whether the sandbox's runtime holds a connection to it. */
+    connected: boolean;
   }> = [];
   const open: typeof openCodexRelaySession = (input) => {
-    const record = { input, runs: [] as CodexRelayRun[], serving: null as CodexRelayRun | null, closed: false };
+    const record = {
+      input,
+      runs: [] as CodexRelayRun[],
+      serving: null as CodexRelayRun | null,
+      closed: false,
+      connected: true,
+    };
     opened.push(record);
     return {
       url: "wss://useagent.example.test/api/internal/codex-relay/opaque",
@@ -65,7 +73,7 @@ function relaySessions(log: string[] = []) {
       deactivate() {
         record.serving = null;
       },
-      get connected() { return false; },
+      get connected() { return record.connected; },
       get closed() { return record.closed; },
       close: () => {
         record.closed = true;
@@ -221,6 +229,40 @@ describe("T3 Codex subscription lease", () => {
     await second.close();
     expect(relays.opened[0]!.serving).toBeNull();
     expect(liveCodexThreadSessions()).toBe(1);
+  });
+
+  test("a kept session whose runtime connection dropped gets a new relay under a new instance name", async () => {
+    // Prod 2026-10-11: the host pauses an idle sandbox about two minutes after a
+    // turn, which cuts the runtime's relay socket. The next turn must not take
+    // that relay back: its runtime session is gone, so it dials a new relay.
+    const relays = relaySessions();
+    const dependencies = {
+      loadThreadBinding: async () => "provider-thread-1",
+      openExecBridge: () => ({ url: "ws://127.0.0.1:43111/grant", close() {} }),
+      openCodeModeBridge: codeModeBridges(),
+      openRelaySession: relays.open,
+    };
+    const first = await prepareCodexSubscription({
+      sandbox: fakeSandbox().sandbox, ctx: context(), workdir: "/root/work", runtime: runtime(), dependencies,
+    });
+    await first.close();
+    relays.opened[0]!.connected = false;
+
+    const resumed = fakeSandbox({ execServerListening: true, codeModeListening: true });
+    const second = await prepareCodexSubscription({
+      sandbox: resumed.sandbox, ctx: { ...context(), runId: "run-2" }, workdir: "/root/work", runtime: runtime(), dependencies,
+    });
+
+    expect(second.sessionReused).toBe(false);
+    expect(relays.opened).toHaveLength(2);
+    expect(relays.opened[0]!.closed).toBe(true);
+    expect(second.codexInstanceName).toMatch(/^Codex subscription [0-9a-f]{8}$/);
+    expect(second.codexInstanceName).not.toBe(first.codexInstanceName);
+    // The runtime is told the new relay under the new name.
+    const patch = resumed.commands.map(({ command }) => command).find((command) => command.includes("CODEX_INSTANCE_B64"));
+    const encoded = patch?.match(/CODEX_INSTANCE_B64='([^']+)'/)?.[1] ?? "";
+    expect(JSON.parse(Buffer.from(encoded, "base64").toString("utf8")).displayName).toBe(second.codexInstanceName);
+    await second.close();
   });
 
   test("a warm turn takes the services probe issued during acquisition, bearer and all", async () => {
@@ -539,6 +581,7 @@ describe("T3 Codex subscription lease", () => {
       relayUrl: "wss://useagent.example.test/api/internal/codex-relay/opaque",
       environmentId: `${SANDBOX_NAME_PREFIX}-run-1`,
       workdir: "/home/user/work",
+      instanceName: "Codex subscription 0a1b2c3d",
     }, {
       home: "/home/user",
       workdir: "/home/user/work",
@@ -650,6 +693,7 @@ describe("T3 Codex subscription lease", () => {
       relayUrl: "wss://useagent.example.test/api/internal/codex-relay/opaque",
       environmentId: `${SANDBOX_NAME_PREFIX}-run-1`,
       workdir: "/root/work",
+      instanceName: "Codex subscription 0a1b2c3d",
     });
     expect(patch).not.toContain("CODEX_HOME");
     expect(patch).not.toContain("access_token");
@@ -670,23 +714,25 @@ describe("T3 Codex subscription lease", () => {
     )).toThrow("outside the Cube sandbox domain");
   });
 
-  test("readiness probe keys on the subscription instance display name in the cache", () => {
-    const command = buildCodexProviderReadyProbeCommand();
-    // Reads the status cache CONTENT (not mtime) for the subscription-only marker.
+  test("readiness probe keys on this relay's instance name in the cache", () => {
+    const command = buildCodexProviderReadyProbeCommand("Codex subscription 0a1b2c3d");
+    // Reads the status cache CONTENT (not mtime) for this relay's own marker:
+    // an instance an earlier relay published does not pass.
     expect(command).toContain("caches/codex.json");
     expect(command).toContain("displayName");
-    expect(command).toContain("Codex subscription");
+    expect(command).toContain("Codex subscription 0a1b2c3d");
     // The probe marker matches the display name the provider-instance patch sets.
     const patch = buildCodexProviderInstanceCommand({
       relayUrl: "wss://useagent.example.test/api/internal/codex-relay/opaque",
       environmentId: `${SANDBOX_NAME_PREFIX}-run-1`,
       workdir: "/root/work",
+      instanceName: "Codex subscription 0a1b2c3d",
     });
     const encoded = patch.match(/CODEX_INSTANCE_B64='([^']+)'/)?.[1] ?? "";
     const instance = JSON.parse(Buffer.from(encoded, "base64").toString("utf8")) as {
       displayName?: string;
     };
-    expect(instance.displayName).toBe("Codex subscription");
+    expect(instance.displayName).toBe("Codex subscription 0a1b2c3d");
   });
 
   test("readiness barrier confirms once the status cache reports the remote instance", async () => {
@@ -703,12 +749,12 @@ describe("T3 Codex subscription lease", () => {
 
     // A zero-length deadline that never confirms falls back (returns false).
     await expect(
-      awaitCodexProviderReady(sandbox, new AbortController().signal, 0),
+      awaitCodexProviderReady(sandbox, new AbortController().signal, 0, "Codex subscription 0a1b2c3d"),
     ).resolves.toBe(false);
     // Once the cache reports the subscription instance, the barrier confirms.
     ready = true;
     await expect(
-      awaitCodexProviderReady(sandbox, new AbortController().signal, 0),
+      awaitCodexProviderReady(sandbox, new AbortController().signal, 0, "Codex subscription 0a1b2c3d"),
     ).resolves.toBe(true);
     expect(commands.every((command) => command.includes("caches/codex.json"))).toBe(true);
   });
@@ -727,7 +773,7 @@ describe("T3 Codex subscription lease", () => {
     } as unknown as SandboxHandle;
 
     await expect(
-      awaitCodexProviderReady(sandbox, controller.signal, 5_000),
+      awaitCodexProviderReady(sandbox, controller.signal, 5_000, "Codex subscription 0a1b2c3d"),
     ).resolves.toBe(false);
     expect(calls).toBe(0);
   });

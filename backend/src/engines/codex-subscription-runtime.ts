@@ -57,10 +57,11 @@ import {
 const CODEX_EXEC_SERVER_PORT = 37_734;
 const CODEX_EXEC_SERVER_SESSION = `${SANDBOX_NAME_PREFIX}-codex-exec-server`;
 const RUNTIME_SETTINGS_PATH = `${RUNTIME_ENVIRONMENT_HOME}/userdata/settings.json`;
-/** Display name carried only by the subscription (relay-backed) codex instance.
- * T3's legacy `providers.codex` synthesis uses the driver default ("Codex"), so
- * this string appearing in the provider status cache is a reliable content marker
- * that the settings-watch reconcile published the remote instance. */
+/** Display name carried only by the subscription (relay-backed) codex instance,
+ * followed by the relay session's own marker. T3's legacy `providers.codex`
+ * synthesis uses the driver default ("Codex"), so the exact name appearing in
+ * the provider status cache proves the settings-watch reconcile published the
+ * instance for THIS relay, not an earlier one. */
 export const CODEX_SUBSCRIPTION_DISPLAY_NAME = "Codex subscription";
 const CODEX_STATUS_CACHE_PATH = `${RUNTIME_ENVIRONMENT_HOME}/caches/codex.json`;
 const CODEX_READY_POLL_MS = 150;
@@ -87,6 +88,8 @@ export interface CodexSubscriptionLease {
   /** The runtime still holds this thread's Codex session from an earlier run:
    * its settings are current, so there is nothing to reconcile or wait for. */
   readonly sessionReused?: boolean;
+  /** The provider instance name the runtime publishes once it serves this relay. */
+  readonly codexInstanceName?: string;
   close(): Promise<void>;
 }
 
@@ -107,6 +110,8 @@ const defaultDependencies: SubscriptionDependencies = {
 /** What a kept thread session holds on this host: the relay and both bridges. */
 interface SubscriptionSessionParts extends CodexThreadSessionParts {
   readonly cwd: string;
+  /** The provider instance name naming this relay in the runtime's settings. */
+  readonly instanceName: string;
   /** The thread-scoped gateway bearer the session's app-server holds. */
   readonly toolGatewayBearer: string | null;
   readonly relay: CodexRelaySession;
@@ -171,10 +176,12 @@ export async function prepareCodexSubscription(input: {
   // it, so the run only becomes the one it serves. Its app-server holds the
   // gateway bearer it started with, so it serves only runs given that same
   // bearer: once the thread's bearer is re-minted, a fresh session starts.
+  // A session whose runtime connection dropped (the sandbox was paused, or the
+  // relay socket closed) is not kept: the runtime must dial a new relay.
   if (reuse && servicesUp) {
     const kept = claimCodexThreadSession<SubscriptionSessionParts>(sessionKey);
     if (
-      kept && !kept.parts.relay.closed && kept.parts.cwd === workdir &&
+      kept && !kept.parts.relay.closed && kept.parts.relay.connected && kept.parts.cwd === workdir &&
       kept.parts.toolGatewayBearer === toolGatewayBearer
     ) {
       kept.parts.codeModeBridge.rotateBearer(codeModeBearer);
@@ -183,6 +190,7 @@ export async function prepareCodexSubscription(input: {
         authEpoch: runtime.authEpoch,
         hasCurrentEpochThreadBinding,
         sessionReused: true,
+        codexInstanceName: kept.parts.instanceName,
         close: releaseWhenDone(kept),
       };
     }
@@ -193,6 +201,9 @@ export async function prepareCodexSubscription(input: {
   let execBridge: ReturnType<typeof openCodexExecServerBridge> | undefined;
   let codeModeBridge: ReturnType<typeof openCodexCodeModeBridge> | undefined;
   let relay: CodexRelaySession | undefined;
+  // A new relay gets a new instance name, so the runtime rebuilds the instance
+  // (ending sessions that dialed the old relay) and the barrier can tell when.
+  const instanceName = `${CODEX_SUBSCRIPTION_DISPLAY_NAME} ${randomBytes(4).toString("hex")}`;
   try {
     await launchMissingCodexServices(sandbox, layout, verdicts);
 
@@ -234,6 +245,7 @@ export async function prepareCodexSubscription(input: {
         relayUrl: relay.url,
         environmentId,
         workdir,
+        instanceName,
       }, layout),
       markProviderGatewaySandboxCurrent(sandbox),
     ]);
@@ -251,6 +263,7 @@ export async function prepareCodexSubscription(input: {
   const parts: SubscriptionSessionParts = {
     environmentId,
     cwd: workdir,
+    instanceName,
     toolGatewayBearer,
     relay: ownedRelay,
     codeModeBridge: ownedCodeModeBridge,
@@ -268,6 +281,7 @@ export async function prepareCodexSubscription(input: {
       authEpoch: runtime.authEpoch,
       hasCurrentEpochThreadBinding,
       sessionReused: false,
+      codexInstanceName: instanceName,
       close: releaseWhenDone(kept),
     };
   }
@@ -276,6 +290,7 @@ export async function prepareCodexSubscription(input: {
     authEpoch: runtime.authEpoch,
     hasCurrentEpochThreadBinding,
     sessionReused: false,
+    codexInstanceName: instanceName,
     async close() {
       if (closed) return;
       closed = true;
@@ -437,10 +452,11 @@ export function buildCodexProviderInstanceCommand(input: {
   readonly relayUrl: string;
   readonly environmentId: string;
   readonly workdir: string;
+  readonly instanceName: string;
 }, layout: SandboxRuntimeLayout = ROOT_RUNTIME_LAYOUT): string {
   const providerInstance = {
     driver: "codex",
-    displayName: CODEX_SUBSCRIPTION_DISPLAY_NAME,
+    displayName: input.instanceName,
     enabled: true,
     environment: [
       { name: "T3_CODEX_APP_SERVER_WS_URL", value: input.relayUrl, sensitive: true },
@@ -477,15 +493,14 @@ export function buildCodexProviderInstanceCommand(input: {
 /** Probe that exits 0 only once T3 has published the subscription codex instance
  * into its provider status cache. Reads the cache CONTENT, not mtime: T3 rewrites
  * the cache for the legacy instance on every health refresh, so a fresh mtime is
- * a false positive. The subscription instance is the only codex instance we mark
- * with this display name, so its presence proves the relay-backed remote instance
- * is live. */
-export function buildCodexProviderReadyProbeCommand(): string {
+ * a false positive. Each relay session names its instance uniquely, so the exact
+ * name proves the instance for this relay is live. */
+export function buildCodexProviderReadyProbeCommand(instanceName: string): string {
   const script = [
     'const fs=require("node:fs")',
     "let v",
     'try{v=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch{process.exit(1)}',
-    `process.exit(v&&v.displayName===${JSON.stringify(CODEX_SUBSCRIPTION_DISPLAY_NAME)}?0:1)`,
+    `process.exit(v&&v.displayName===${JSON.stringify(instanceName)}?0:1)`,
   ].join(";");
   return [
     "set -eu",
@@ -501,8 +516,9 @@ export async function awaitCodexProviderReady(
   sandbox: Pick<SandboxHandle, "process">,
   signal: AbortSignal,
   deadlineMs: number,
+  instanceName: string,
 ): Promise<boolean> {
-  const command = buildCodexProviderReadyProbeCommand();
+  const command = buildCodexProviderReadyProbeCommand(instanceName);
   const deadline = Date.now() + deadlineMs;
   while (!signal.aborted) {
     const probe = await sandbox.process
