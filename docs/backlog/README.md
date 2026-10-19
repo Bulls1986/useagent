@@ -4,7 +4,7 @@
 > 最后整理：**2026-10-19**；仓库：`Bulls1986/useagent`。  
 > **本次只记录规划**：不修改业务代码、不调整运行配置、不启动开发。以下状态以当前讨论记录为基础，并非对最新部署的正式复验。
 
-## 待办全量清单（10 项）
+## 待办全量清单（14 项）
 
 | ID | 类别 | 待办事项 / 详情文档 | 优先级 | 状态 | 当前下一步 |
 | --- | --- | --- | --- | --- | --- |
@@ -16,10 +16,18 @@
 | **UA-BL-06** | Sandbox Provider | [CubeSandbox 原生模板、实例生命周期与真实兼容验证](./cubesandbox-compatibility.md) | 后续兼容 | Backlog | 条件符合的 Linux/KVM 环境下验证；不影响当前 Local |
 | **UA-BL-07** | 多用户安全 | [User/Org/Session/Sandbox/Artifact/Skill 隔离](./multi-user-isolation.md) | **Must-have** | 待安全 E2E | 构造同 Org/跨 Org 多用户越权验证矩阵 |
 | **UA-BL-08** | Native Model Adapter | [Claude Code 通过 LiteLLM Anthropic Messages 使用 GLM 等模型](./claude-code-litellm-adapter.md) | **Must-have** | Backlog | 插件式 Model Provider Adapter，Codex/OpenCode 零回归 |
+| **UA-BL-09** | Skills UX | [Skill / Playbook 统一入口与管理操作收口](./skill-playbook-unified-experience.md) | **P1** | Backlog | 保留底层 kind，合并用户概念、统一编辑/删除/选择入口 |
+| **UA-BL-10** | Learning 正确性 | [候选识别、成功证据与操作步骤提取质量](./learning-evidence-quality.md) | **P1** | Backlog | 审核真实验证证据、Step/Artifact 判定与失败/裁剪边界 |
+| **UA-BL-11** | Learning 发现 | [多语言相似任务聚类与中文技能匹配](./learning-multilingual-clustering.md) | **P1** | Backlog | 中文/混合语义匹配基线，降低误合并与漏召回 |
+| **UA-BL-12** | Learning 审核发布 | [提案组装、双级审核、产物追溯与可靠发布](./learning-proposal-publish-traceability.md) | **P1** | Backlog | 提升提案质量，修复丢失回执、失败补偿和来源追溯 |
 | **UA-BUG-01** | 性能 / MCP | [`workpiece_create` 失败频繁、重试拖慢任务](./workpiece-create-failures.md) | 待按复现评估 | **Open investigation** | 当前版本重放日志、复现分类与最小修复 |
 | **UA-BUG-02** | Local Runner | [Docker Runner 闲置停止/恢复/删除/磁盘释放及真实执行闭环](./local-docker-runner-lifecycle.md) | 真实 E2E 优先 | **待复验** | 复测回收与历史 bwrap/Shell 问题，再定 GC/TTL |
 
-**汇总**：8 项功能/能力与安全验收（UA-BL-01～08）+ 2 项待排查/复验的历史缺陷（UA-BUG-01～02）。全数均尚未在这份 Backlog 中标记完成；**不等于代码当前必然未实现**。实施前需用最新 Head、测试和部署证据重新判定。
+**汇总**：12 项功能/能力与安全验收（UA-BL-01～12）+ 2 项待排查/复验的历史缺陷（UA-BUG-01～02）。全数均尚未在这份 Backlog 中标记完成；**不等于代码当前必然未实现**。实施前需用最新 Head、测试和部署证据重新判定。
+
+## 本轮新增系列任务（2026-10-19）
+
+UA-BL-09～12 为同一系列的分项待办：用户侧统一 Skill/Playbook → 学习候选/证据正确性 → 中文及混合语义匹配 → 技能提案组装/两级人工审核/发布可追溯。**完整 Skill 包管理与原生 Runtime 下发继续由既有 UA-BL-04 负责**，不得重复实施。各项可分开验收，实施顺序与排期在启动前依据最新代码和真实测试确认。本次只记录 Backlog，不启动开发。
 
 ## 已冻结的共同决策
 

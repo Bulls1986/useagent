@@ -5,10 +5,15 @@
 | 类型 | Must-have 功能 |
 | 优先级 | Must-have |
 | 状态 | Backlog；历史上存在部分管理/注入能力，尚未满足完整 Skill |
-| 关联 | [UA-BL-07 隔离](./multi-user-isolation.md)、[UA-BL-03 Artifact](./artifact-storage-s3-minio.md) |
+| 关联 | [UA-BL-07 隔离](./multi-user-isolation.md)、[UA-BL-03 Artifact](./artifact-storage-s3-minio.md)、[UA-BL-09 UI 统一](./skill-playbook-unified-experience.md)、[UA-BL-12 学习发布](./learning-proposal-publish-traceability.md) |
 
 ## 背景
 此前反馈：UseAgent Skills 缺少完整的编辑和删除 UI，当前“Skill”偏向结构化 Markdown 文本注入，而不是标准的完整 Skill 包；仅将几段描述传给 Agent 并不能支持 `scripts`、`references` 或 `assets`。**关键在于真正下发给原生 Agent 工具并被原生发现。**
+
+## 与新增 Backlog 的范围划分
+- **UA-BL-04 拥有完整 Skill 包的存储、版本、脚本/资源目录、沙箱分发和原生 Runtime 发现/执行契约**；如涉及后端新格式和安全规则，在本项实施。
+- **UA-BL-09 只负责普通用户统一 Skill/Playbook 概念和现有管理操作的 UI 收口**，不重复做完整包后端、原生下发。
+- **UA-BL-12 只负责学习提案组装、审核回执、发布和来源追踪**，生成的 Skill 仍需满足本项包格式及 Runtime 支持矩阵。
 
 ## 已讨论并冻结的责任分工
 - **UseAgent = Skill Registry**：负责完整包存储、导入/编辑/删除、版本、权限、审计及会话授权。
