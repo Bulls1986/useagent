@@ -1,10 +1,12 @@
-# Must-have Backlog：Claude Code × LiteLLM 模型适配（插件化，OpenCode/Codex 零回归）
+# UA-BL-08｜Must-have Backlog：Claude Code × LiteLLM 模型适配（插件化，OpenCode/Codex 零回归）
 
 > 状态：**Backlog / Deferred（暂不开发）**  
 > 级别：**Must-have（后续必须实现）**  
 > 登记日期：2026-10-19  
 > 实施版本／排期／负责人：待后续规划  
 > 本文档是需求与验收约束，不代表功能已实现或验证通过。
+
+> 关联：[全部待办](./README.md) · [LiteLLM 动态模型目录](./litellm-dynamic-model-catalog.md) · [原生 Session 连续性](./native-claude-session-continuity.md)
 
 ## 目标
 
