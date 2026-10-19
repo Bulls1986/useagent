@@ -4,7 +4,7 @@
 > 最后整理：**2026-10-19**；仓库：`Bulls1986/useagent`。  
 > **本次只记录规划**：不修改业务代码、不调整运行配置、不启动开发。以下状态以当前讨论记录为基础，并非对最新部署的正式复验。
 
-## 待办全量清单（15 项）
+## 待办全量清单（20 项）
 
 | ID | 类别 | 待办事项 / 详情文档 | 优先级 | 状态 | 当前下一步 |
 | --- | --- | --- | --- | --- | --- |
@@ -21,14 +21,28 @@
 | **UA-BL-11** | Learning 发现 | [多语言相似任务聚类与中文技能匹配](./learning-multilingual-clustering.md) | **P1** | Backlog | 中文/混合语义匹配基线，降低误合并与漏召回 |
 | **UA-BL-12** | Learning 审核发布 | [提案组装、双级审核、产物追溯与可靠发布](./learning-proposal-publish-traceability.md) | **P1** | Backlog | 提升提案质量，修复丢失回执、失败补偿和来源追溯 |
 | **UA-BL-13** | 企业 AI 门户 / Work | [LibreChat Chat + UseAgent Work/Cowork 增量集成主线](./enterprise-portal-work-mode-integration.md) | **产品主线 / 待排期** | Backlog | 先验证 Work 单独闭环及两侧身份集成边界，分阶段接入门户 |
+| **UA-BL-14** | MCP / Runtime | [MCP Management V1：Streamable HTTP、stdio 与 Session 绑定](./mcp-management-v1.md) | **P0 / Must-have** | Backlog | 原生 Runtime 配置适配、网络/预装 stdio E2E；无中央工具代理 |
+| **UA-BL-15** | Sandbox Operations | [Cube 资源观测、实例管理与安全 Force Kill（OPS-01）](./sandbox-operations-console.md) | **P0** | Backlog | Cube 实例归属与容量口径、正常 Release/Force Kill 一致性 |
+| **UA-BL-16** | Sandbox Templates | [模板在线定义、构建、验证、发布与回滚（OPS-02）](./sandbox-template-lifecycle.md) | **P0** | Backlog | 复用 Cube 原生 Template/OCI，Session 持久化真实模板 ID |
+| **UA-BL-17** | Sandbox Policies | [按组织、Group/角色、用户分配模板与配额（OPS-03）](./template-assignment-policy.md) | **P0** | Backlog | 确定权限/默认决议与历史 Session 固定绑定，不复用登录角色冒充业务角色 |
+| **UA-BL-18** | Sandbox Capacity | [多模板 Warm Pool 和容量管理（OPS-04）](./multi-template-warm-pool.md) | **P1** | Backlog | 以独立模板/规格分池，不阻塞 P0 管理台与 MCP |
 | **UA-BUG-01** | 性能 / MCP | [`workpiece_create` 失败频繁、重试拖慢任务](./workpiece-create-failures.md) | 待按复现评估 | **Open investigation** | 当前版本重放日志、复现分类与最小修复 |
 | **UA-BUG-02** | Local Runner | [Docker Runner 闲置停止/恢复/删除/磁盘释放及真实执行闭环](./local-docker-runner-lifecycle.md) | 真实 E2E 优先 | **待复验** | 复测回收与历史 bwrap/Shell 问题，再定 GC/TTL |
 
-**汇总**：13 项功能/能力与安全验收（UA-BL-01～13）+ 2 项待排查/复验的历史缺陷（UA-BUG-01～02）。全数均尚未在这份 Backlog 中标记完成；**不等于代码当前必然未实现**。实施前需用最新 Head、测试和部署证据重新判定。
+**汇总**：18 项功能/能力与安全验收（UA-BL-01～18）+ 2 项待排查/复验的历史缺陷（UA-BUG-01～02）。全数均尚未在这份 Backlog 中标记完成；**不等于代码当前必然未实现**。实施前需用最新 Head、测试和部署证据重新判定。
 
 ## 产品集成主线（2026-10-19）
 
 **[UA-BL-13：企业 AI 门户增量 Work / Cowork 模式](./enterprise-portal-work-mode-integration.md)**：已有 **LibreChat 继续承担 Chat**，**UseAgent 原生 CLI Runtime 作为 Work 执行底座**。先让 UseAgent Work 单独可用，逐步实现统一身份/入口、Chat → Work 显式任务交接，再考虑进度/成果回流与 UI 融合。以低改造量、原生 Agent Session/沙箱隔离和企业权限治理为边界；内部能力缺口复用 UA-BL-01～12 与 UA-BUG-01～02，不另造相同待办。本轮只登记目标和实施阶段，不启动代码开发。
+
+## MCP 与 Sandbox Operations 主线（2026-10-19）
+
+- **[UA-BL-14 MCP Management V1](./mcp-management-v1.md)**：组织/用户注册与授权，Session 选择和配置绑定；支持远程 Streamable HTTP 和模板**预装**的 stdio，Runtime（Claude/Codex/OpenCode）原生执行，首期不做用户任意命令动态安装或中央 MCP Client。
+- **[UA-BL-15 OPS-01](./sandbox-operations-console.md)**：运维实时识别 Cube 状态、节点容量、实例归属、预热池与排队；支持 Pause/Resume、正常 Release、受控 Force Kill，并与 Thread/Run/lease 事务和审计协调。实例配置 CPU/内存、可分配额度、预留资源与实时使用量必须区别显示。
+- **[UA-BL-16 OPS-02](./sandbox-template-lifecycle.md)**：Infrastructure 在线模板目录、Draft/Build/Validate/Publish/Rollback；实际构建委托 Cube 原生模板/OCI 能力；发布版本固定真实 Template ID，Alias 更新只作用于新建实例。
+- **[UA-BL-17 OPS-03](./template-assignment-policy.md)**：组织/Group/业务角色/用户的模板目录授权、默认选择与资源档位；不把账号 owner/admin/member 直接当业务角色；Session 固定所选模板与版本。
+- **[UA-BL-18 OPS-04](./multi-template-warm-pool.md)**：不同模板/版本的预热池和容量调度，定为 **P1 后续**，不作为 P0 MCP 和运维闭环的前置条件。
+- **与旧项关系**：UA-BL-06 专注 Cube Provider 的真实兼容 E2E 与生命周期语义，UA-BL-01 管 Hooks，UA-BL-07 管跨用户/组织安全隔离；本系列管理功能**关联复用**旧项，而不是重造它们。仅登记规划，不修改现有 Local/Daytona/Cube 部署或开始开发。
 
 ## 本轮新增系列任务（2026-10-19）
 
@@ -39,6 +53,7 @@ UA-BL-09～12 为同一系列的分项待办：用户侧统一 Skill/Playbook �
 - **企业门户定位**：LibreChat = Chat，UseAgent = Work/Cowork 增量执行模式；统一入口与企业身份，保留双方自身会话/执行边界，不强制重建门户。
 - **原生 Agent Runtime**：每任务/会话在独立 Sandbox 运行完整 CLI Runtime；UseAgent 管理输入输出、调度、权限、事件、会话映射与生命周期；**不重写 Agent Loop**。
 - **Local vs Cube**：Windows Local Docker Runner 是现阶段本地验证路线；CubeSandbox 是后续在适合宿主环境的真实兼容目标。不能静默回退 Daytona 或擅自切换当前沙箱。
+- **沙箱运维治理**：Cube 执行资源调度、虚拟机与原生模板；UseAgent Operations 负责身份/实例归属、资源口径、安全处置、模板版本发布与 Session 授权策略；强制终止必须维护运行/会话/lease/审计一致性。
 - **插件化**：能用 Provider/Adapter/Storage/Skill Registry 扩展的，不做多处硬编码特判；不为了一个功能搭建通用插件市场。
 - **非回归 P0**：OpenCode 和 Codex 的现有模型、上游路由、认证、Streaming、Tool Use 和 Session 必须保持稳定；CC 原生路径亦然。
 - **安全与数据**：Tenant/User/Run/Thread/Sandbox 权限绑定、密钥保护、模型授权、Workpiece 与 Artifact 持久性不能降低。
