@@ -43,3 +43,9 @@
 - [ ] Local、Box 等既有 Provider 及 Codex/OpenCode/CC Driver 无回归。
 
 > 待确认：最终 Cube 版本/宿主资源及暂停能力、默认空闲/过期清理策略。
+
+## 运维扩展关系（2026-10-19）
+
+- 本项 **UA-BL-06** 只负责 Cube Provider 原生运行、模板语义、生命周期兼容的真实 E2E；它不承接管理 UI 或模板发布功能，保持原验收边界。
+- [UA-BL-15](./sandbox-operations-console.md) 负责 Cube 资源/实例运维与安全 Force Kill；[UA-BL-16](./sandbox-template-lifecycle.md) 负责模板在线定义、构建/发布/回滚；[UA-BL-17](./template-assignment-policy.md) 负责组织/角色/用户模板策略；[UA-BL-18](./multi-template-warm-pool.md) 负责后续多模板预热池。
+- 上述独立项依赖本项的真实 Cube Provider 能力确认，不代表 UA-BL-06 自动扩大范围或管理界面已实现。
