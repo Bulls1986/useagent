@@ -334,7 +334,9 @@ async function launchMissingCodexServices(
     forwarder: verdicts[CODEX_CODE_MODE_FORWARDER_PORT] !== LISTENER_OURS,
   };
   if (startCodeMode.host || startCodeMode.forwarder) {
-    await sandbox.process.createSession(CODEX_CODE_MODE_SESSION);
+    // A stopped host's session may still exist (with a live forwarder in it, so it is
+    // not deleted); the launch below fails if there is none.
+    await sandbox.process.createSession(CODEX_CODE_MODE_SESSION).catch(() => {});
     const launch = await sandbox.process.executeSessionCommand(
       CODEX_CODE_MODE_SESSION,
       { command: buildCodexCodeModeLaunchCommand(layout, startCodeMode), runAsync: true, suppressInputEcho: true },

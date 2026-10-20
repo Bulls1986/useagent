@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { SandboxHandle, SandboxExecuteResult } from "../sandboxes/provider";
@@ -26,7 +26,7 @@ import {
   prewarmCodexServices,
   previewWebSocketUrl,
 } from "./codex-subscription-runtime";
-import { buildSandboxListenerProbeCommand, LISTENER_FOREIGN, LISTENER_STALE } from "./sandbox-listener-probe";
+import { buildSandboxListenerProbeCommand, LISTENER_ABSENT, LISTENER_FOREIGN, LISTENER_STALE } from "./sandbox-listener-probe";
 import { SANDBOX_NAME_PREFIX } from "../sandboxes/sandbox-names";
 
 const priorGatewayUrl = process.env.PROVIDER_GATEWAY_PUBLIC_URL;
@@ -548,6 +548,40 @@ describe("T3 Codex subscription lease", () => {
     }
   });
 
+  test("a stop waits out the polls where its killed holder reads as nobody's", async () => {
+    // While a killed holder exits, its LISTEN entry can outlive the fd that held it, and
+    // a port with no visible holder reads as foreign. The stop keeps polling until the
+    // port is free instead of ending on that and failing the turn as another process's.
+    const home = await mkdtemp(join(tmpdir(), "useagent-exec-stop-"));
+    const layout = { home, workdir: `${home}/work`, runsAsRoot: false, bunExecutable: "/usr/local/bin/bun" };
+    const nativeDir = `${home}/.local/share/useagent/native-engines/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin`;
+    await mkdir(nativeDir, { recursive: true });
+    const header = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n";
+    const stale = Bun.spawn(["sleep", "30"]);
+    try {
+      const proc = await mkdtemp(join(home, "proc-"));
+      await mkdir(join(proc, "net"));
+      await writeFile(join(proc, "net/tcp"), header +
+        "   0: 00000000:9366 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 4242 1 0 100 0 0 10 0\n");
+      await mkdir(join(proc, `${stale.pid}/fd`), { recursive: true });
+      await symlink("socket:[4242]", join(proc, `${stale.pid}/fd/3`));
+      await symlink(`${await realpath(nativeDir)}/codex (deleted)`, join(proc, `${stale.pid}/exe`));
+      await writeFile(join(proc, `${stale.pid}/cmdline`), "codex\0exec-server\0--listen\0ws://0.0.0.0:37734\0");
+      const stop = buildSandboxListenerProbeCommand([codexExecServerOwner(layout)], 5_000, { stopStale: true });
+      const probe = Bun.spawn(["sh", "-c", `${stop} ${proc}`], { stdout: "pipe" });
+
+      expect(await Promise.race([stale.exited.then(() => true), Bun.sleep(5_000).then(() => false)])).toBe(true);
+      await rm(join(proc, String(stale.pid)), { recursive: true }); // the socket is still listed, held by nobody
+      await Bun.sleep(200);
+      await writeFile(join(proc, "net/tcp"), header); // then it is gone
+
+      expect(await probe.exited).toBe(1);
+      expect(JSON.parse((await new Response(probe.stdout).text()).trim())).toEqual({ 37734: LISTENER_ABSENT });
+    } finally {
+      stale.kill();
+    }
+  });
+
   test("points the app-server's code mode at the sandbox host through this run's bearer", async () => {
     const harness = fakeSandbox({ execServerListening: true });
     const relays = relaySessions();
@@ -608,6 +642,34 @@ describe("T3 Codex subscription lease", () => {
     expect(commands.findIndex((command) => command.includes("const deadline=Date.now()+15000;"))).toBeGreaterThan(stopAt);
     expect(harness.createdSessions).toEqual([`${SANDBOX_NAME_PREFIX}-codex-exec-server`]);
     expect(harness.sessionCommands.map(({ command }) => command).join("\n")).toContain("exec-server --listen");
+    expect(relays.opened).toHaveLength(1);
+    await lease.close();
+  });
+
+  test("starts the code-mode host again when its earlier session still exists", async () => {
+    // Stopping a stale host leaves its process session behind. A provider that refuses a
+    // duplicate session id must not fail the relaunch; deleting the session instead would
+    // also stop a live forwarder running in it.
+    const harness = fakeSandbox({
+      execServerListening: true,
+      createSessionRejects: [`${SANDBOX_NAME_PREFIX}-codex-code-mode`],
+    });
+    const relays = relaySessions();
+
+    const lease = await prepareCodexSubscription({
+      sandbox: harness.sandbox,
+      ctx: context(),
+      workdir: "/root/work",
+      runtime: runtime(),
+      dependencies: {
+        loadThreadBinding: async () => null,
+        openExecBridge: () => ({ url: "ws://127.0.0.1:43111/grant", close() {} }),
+        openCodeModeBridge: codeModeBridges(),
+        openRelaySession: relays.open,
+      },
+    });
+
+    expect(harness.sessionCommands.map(({ sessionId }) => sessionId)).toEqual([`${SANDBOX_NAME_PREFIX}-codex-code-mode`]);
     expect(relays.opened).toHaveLength(1);
     await lease.close();
   });
@@ -896,6 +958,8 @@ function fakeSandbox(options: {
   /** The exec-server port is held by ours on a replaced Codex until a stop probe kills it. */
   execServerStale?: boolean;
   codeModeListening?: boolean;
+  /** Session ids the provider refuses to create again (it already has them). */
+  createSessionRejects?: readonly string[];
   failProviderPatch?: boolean;
   launchExit?: number;
   providerKind?: "box" | "cube" | "daytona";
@@ -935,6 +999,7 @@ function fakeSandbox(options: {
         return result;
       },
       async createSession(sessionId: string) {
+        if (options.createSessionRejects?.includes(sessionId)) throw new Error(`session ${sessionId} already exists`);
         createdSessions.push(sessionId);
       },
       async deleteSession(sessionId: string) {

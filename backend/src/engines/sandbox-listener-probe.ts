@@ -33,7 +33,8 @@ export type ListenerVerdicts = Readonly<Record<number, number>>;
  * 1 nothing listening, 2 held by another process, 3 ours on a replaced
  * executable) and exits 0 when every port is ours, 2 as soon as one is foreign,
  * 1 otherwise at the deadline. Polls every 50 ms until then. With `stopStale`
- * it kills each stale holder (only those) and is done once no port is stale.
+ * it kills each stale holder (only those) and is done once every port is ours or
+ * free: a holder still exiting after its kill can read as foreign for a moment.
  * The optional trailing argument is the proc root, for tests.
  */
 export function buildSandboxListenerProbeCommand(
@@ -55,7 +56,7 @@ export function buildSandboxListenerProbeCommand(
     'const exeOf=pid=>{const link=path.join(proc,pid,"exe");try{return{file:fs.realpathSync(link),stale:false}}catch{}try{const target=fs.readlinkSync(link);return target.endsWith(" (deleted)")?{file:target.slice(0,-" (deleted)".length),stale:true}:null}catch{return null}}',
     'const identity=(pid,owner)=>{try{const exe=exeOf(pid);if(!exe)return"foreign";const args=fs.readFileSync(path.join(proc,pid,"cmdline"),"utf8").split("\\0");if(owner.executablePath){if(real(owner.executablePath)!==exe.file)return"foreign"}else{const root=real(owner.installRoot),rel=root===null?"..":path.relative(root,exe.file);if(path.basename(exe.file)!==owner.executable||rel===""||rel.startsWith("..")||path.isAbsolute(rel))return"foreign"}return owner.args.every((arg,i)=>args[i+1]===arg)?(exe.stale?"stale":"ours"):"foreign"}catch{return"foreign"}}',
     'const verdict=owner=>{const found=listening(owner);if(found.size===0)return 1;const holders=fs.readdirSync(proc).filter(pid=>!Number.isNaN(Number(pid))&&holds(pid,found));if(holders.length===0)return 2;const ids=holders.map(pid=>identity(pid,owner));if(ids.includes("foreign"))return 2;if(!ids.includes("stale"))return 0;if(stop)holders.forEach((pid,i)=>{if(ids[i]==="stale")try{process.kill(Number(pid),"SIGKILL")}catch{}});return 3}',
-    'const probe=()=>{const verdicts={};for(const owner of owners)verdicts[owner.port]=verdict(owner);const values=Object.values(verdicts);const done=Date.now()>=deadline||(stop?!values.includes(3):values.every(v=>v===0)||values.includes(2));if(!done){setTimeout(probe,50);return}console.log(JSON.stringify(verdicts));process.exit(values.includes(2)?2:values.every(v=>v===0)?0:1)}',
+    'const probe=()=>{const verdicts={};for(const owner of owners)verdicts[owner.port]=verdict(owner);const values=Object.values(verdicts);const done=Date.now()>=deadline||(stop?values.every(v=>v===0||v===1):values.every(v=>v===0)||values.includes(2));if(!done){setTimeout(probe,50);return}console.log(JSON.stringify(verdicts));process.exit(values.includes(2)?2:values.every(v=>v===0)?0:1)}',
     "probe()",
   ].join(";");
   const encoded = Buffer.from(JSON.stringify(owners), "utf8").toString("base64");
