@@ -265,10 +265,6 @@ Sandboxes are plugins: **Daytona** (managed, the easiest start),
 Docker Compose for a single machine is in
 [`docs/operations/compose-releases.md`](docs/operations/compose-releases.md).
 
-## Project backlog
-
-The tracked [UseAgent Backlog](docs/backlog/README.md) is the canonical index of open work, with stable IDs, priorities, statuses and links to detailed scopes and acceptance criteria. Current planning includes MCP Management and Cube Sandbox Operations (observability and safe instance controls, online template lifecycle, role/group assignment and multi-template warm pools). These are proposals, not released features.
-
 ## Architecture
 
 <p align="center">
