@@ -4,7 +4,7 @@
 > 最后整理：**2026-10-21**；仓库：`Bulls1986/useagent`。  
 > **本次只记录规划**：不修改业务代码、不调整运行配置、不启动开发。以下状态以当前讨论记录为基础，并非对最新部署的正式复验。
 
-## 待办全量清单（21 项）
+## 待办全量清单（22 项）
 
 | ID | 类别 | 待办事项 / 详情文档 | 优先级 | 状态 | 当前下一步 |
 | --- | --- | --- | --- | --- | --- |
@@ -29,8 +29,9 @@
 | **UA-BUG-01** | 性能 / MCP | [`workpiece_create` 失败频繁、重试拖慢任务](./workpiece-create-failures.md) | 待按复现评估 | **Open investigation** | 当前版本重放日志、复现分类与最小修复 |
 | **UA-BUG-02** | Local Runner | [Docker Runner 闲置停止/恢复/删除/磁盘释放及真实执行闭环](./local-docker-runner-lifecycle.md) | 真实 E2E 优先 | **待复验** | 复测回收与历史 bwrap/Shell 问题，再定 GC/TTL |
 | **UA-BUG-03** | Run / Repository | [GitHub URL 错误提升为持久仓库，失败 Run 阻塞会话恢复](./github-repo-url-promotion-run-recovery.md) | **P0** | **Open investigation** | 排查隐式 URL→repos 持久化路径，修正 Admission 与失败后新消息交付 |
+| **UA-BUG-04** | Run 启动性能 | [每次 Run 前置准备耗时偏长：先诊断，后定方案](./run-preparation-performance-diagnosis.md) | 待数据评估 | **Open investigation / 待数据** | 收集同一 Session 连续 Run 的 timing 与日志，定位可复现的主要耗时环节；不预设优化方案 |
 
-**汇总**：18 项功能/能力与安全验收（UA-BL-01～18）+ 3 项待排查/复验的缺陷（UA-BUG-01～03）。全数均尚未在这份 Backlog 中标记完成；**不等于代码当前必然未实现**。实施前需用最新 Head、测试和部署证据重新判定。
+**汇总**：18 项功能/能力与安全验收（UA-BL-01～18）+ 4 项待排查/复验的缺陷（UA-BUG-01～04）。全数均尚未在这份 Backlog 中标记完成；**不等于代码当前必然未实现**。实施前需用最新 Head、测试和部署证据重新判定。
 
 ## 产品集成主线（2026-10-19）
 
