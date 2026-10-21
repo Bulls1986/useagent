@@ -1,10 +1,10 @@
 # UseAgent Backlog｜全部待办总表
 
 > **维护入口：本 README 是全部待办的唯一总表**。每项的已确定方案、范围、注意点、验收门禁放在各自的独立 Markdown 文档中；历史汇总仅保留讨论快照，不再作为维护入口。  
-> 最后整理：**2026-10-19**；仓库：`Bulls1986/useagent`。  
+> 最后整理：**2026-10-21**；仓库：`Bulls1986/useagent`。  
 > **本次只记录规划**：不修改业务代码、不调整运行配置、不启动开发。以下状态以当前讨论记录为基础，并非对最新部署的正式复验。
 
-## 待办全量清单（20 项）
+## 待办全量清单（21 项）
 
 | ID | 类别 | 待办事项 / 详情文档 | 优先级 | 状态 | 当前下一步 |
 | --- | --- | --- | --- | --- | --- |
@@ -28,12 +28,13 @@
 | **UA-BL-18** | Sandbox Capacity | [多模板 Warm Pool 和容量管理（OPS-04）](./multi-template-warm-pool.md) | **P1** | Backlog | 以独立模板/规格分池，不阻塞 P0 管理台与 MCP |
 | **UA-BUG-01** | 性能 / MCP | [`workpiece_create` 失败频繁、重试拖慢任务](./workpiece-create-failures.md) | 待按复现评估 | **Open investigation** | 当前版本重放日志、复现分类与最小修复 |
 | **UA-BUG-02** | Local Runner | [Docker Runner 闲置停止/恢复/删除/磁盘释放及真实执行闭环](./local-docker-runner-lifecycle.md) | 真实 E2E 优先 | **待复验** | 复测回收与历史 bwrap/Shell 问题，再定 GC/TTL |
+| **UA-BUG-03** | Run / Repository | [GitHub URL 错误提升为持久仓库，失败 Run 阻塞会话恢复](./github-repo-url-promotion-run-recovery.md) | **P0** | **Open investigation** | 排查隐式 URL→repos 持久化路径，修正 Admission 与失败后新消息交付 |
 
-**汇总**：18 项功能/能力与安全验收（UA-BL-01～18）+ 2 项待排查/复验的历史缺陷（UA-BUG-01～02）。全数均尚未在这份 Backlog 中标记完成；**不等于代码当前必然未实现**。实施前需用最新 Head、测试和部署证据重新判定。
+**汇总**：18 项功能/能力与安全验收（UA-BL-01～18）+ 3 项待排查/复验的缺陷（UA-BUG-01～03）。全数均尚未在这份 Backlog 中标记完成；**不等于代码当前必然未实现**。实施前需用最新 Head、测试和部署证据重新判定。
 
 ## 产品集成主线（2026-10-19）
 
-**[UA-BL-13：企业 AI 门户增量 Work / Cowork 模式](./enterprise-portal-work-mode-integration.md)**：已有 **LibreChat 继续承担 Chat**，**UseAgent 原生 CLI Runtime 作为 Work 执行底座**。先让 UseAgent Work 单独可用，逐步实现统一身份/入口、Chat → Work 显式任务交接，再考虑进度/成果回流与 UI 融合。以低改造量、原生 Agent Session/沙箱隔离和企业权限治理为边界；内部能力缺口复用 UA-BL-01～12 与 UA-BUG-01～02，不另造相同待办。本轮只登记目标和实施阶段，不启动代码开发。
+**[UA-BL-13：企业 AI 门户增量 Work / Cowork 模式](./enterprise-portal-work-mode-integration.md)**：已有 **LibreChat 继续承担 Chat**，**UseAgent 原生 CLI Runtime 作为 Work 执行底座**。先让 UseAgent Work 单独可用，逐步实现统一身份/入口、Chat → Work 显式任务交接，再考虑进度/成果回流与 UI 融合。以低改造量、原生 Agent Session/沙箱隔离和企业权限治理为边界；内部能力缺口复用 UA-BL-01～12 与 UA-BUG-01～03，不另造相同待办。本轮只登记目标和实施阶段，不启动代码开发。
 
 ## MCP 与 Sandbox Operations 主线（2026-10-19）
 
