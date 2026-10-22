@@ -90,15 +90,23 @@ describe("composeTurnPrompt — fresh vs resumed context", () => {
     expect(W).not.toContain(`${"Sky"}net automations`);
   });
 
-  test("routes explicit user-visible fan-out through durable product children when available", () => {
+  test("reserves product children for explicit visible sessions and prefers native runtime subagents by default", () => {
     const out = composeTurnPrompt(ctx(), true, EXECUTION, { PRODUCT_CHILD_THREADS: "on" });
-    expect(out).toContain("MUST use the trusted child_session_create_many tool");
-    expect(out).toContain("at least two substantial independent workstreams");
-    expect(out).toContain("you MUST use child_session_create_many");
-    expect(out).toContain("multi-subject research or comparison requests");
+    expect(out).toContain("When the user explicitly asks for independently visible, independently messageable child sessions, you MUST");
+    expect(out).toContain("Do not use product child sessions just because a request asks to delegate, parallelize, or handle multiple workstreams.");
+    expect(out).toContain("prefer the current native Runtime's subagent/task mechanism");
+    expect(out).not.toContain("MUST use child_session_create_many when the request has at least two substantial independent workstreams");
+    expect(out).not.toContain("multi-subject research or comparison requests");
     expect(out).toContain("child_session_gather shows the relevant children settled");
     expect(out).toContain("Do not busy-poll");
-    expect(out).toContain("Native harness subagents are only for internal decomposition");
+    expect(out).toContain("If the current Runtime does not support native subagents");
+  });
+
+  test("native runtime decomposition guidance remains when product child sessions are disabled", () => {
+    const out = composeTurnPrompt(ctx(), true, EXECUTION, { PRODUCT_CHILD_THREADS: "off" });
+    expect(out).toContain("prefer the current native Agent Runtime's own subagent/task mechanism when supported");
+    expect(out).toContain("Do not create UseAgent product child sessions merely because a request has multiple independent workstreams");
+    expect(out).not.toContain("child_session_create_many");
   });
 
   test("does not advertise product fan-out when the current execution snapshot cannot reach tools", () => {

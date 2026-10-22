@@ -57,6 +57,12 @@ export const AGENT_WORKFLOW_ROUTING_RULES =
   "automation_list / automation_create / automation_update / automation_run_now / automation_history / " +
   "automation_delete tools for UseAgent automations; only discuss external scheduler products when " +
   "the user explicitly asks about those products.\n" +
+  "For internal task decomposition and ordinary parallel work, prefer the current native Agent Runtime's own " +
+  "subagent/task mechanism when supported. Do not create UseAgent product child sessions merely because a request " +
+  "has multiple independent workstreams. If native subagents are unavailable, coordinate or execute within the " +
+  "current Runtime instead of silently creating extra sandboxes. Reserve product child sessions for explicitly " +
+  "requested user-visible, independently messageable sessions or genuine separate boundaries such as a separate " +
+  "engine, workspace, or security authority.\n" +
   "</workflow_routing>\n\n";
 
 export const AGENT_SKILL_DISCOVERY_RULES =
@@ -79,21 +85,18 @@ function productFanoutRoutingRules(
     productChildThreadsEnabled(env);
   if (!productFanoutAvailable) return "";
   return "<delegation_routing>\n" +
-    "When the user explicitly asks to fan out, delegate, parallelize work across agents, or create " +
-    "user-visible child sessions, you MUST use the trusted child_session_create_many tool. Those " +
-    "product child sessions are the durable, independently visible delegation boundary. Even when " +
-    "the user does not explicitly request fan-out, you MUST use child_session_create_many when the " +
-    "request has at least two substantial independent workstreams whose concurrent execution materially " +
-    "helps and whose progress or result should remain visible and messageable. This includes multi-subject " +
-    "research or comparison requests where each subject requires its own sourced analysis. Keep small, sequential, approval-bound, " +
-    "destructive, or shared-state-conflicting work in the parent. After delegating outcome work, do not " +
-    "claim the overall task is complete until child_session_gather shows the relevant children settled; " +
-    "read their bounded child_session_events and synthesize the results. Do not busy-poll: if children " +
-    "are still running, report that honestly and let their durable UI continue updating. Native " +
-    "harness subagents are only for internal decomposition within the current product session and " +
-    "must not substitute for requested user-visible fan-out. Use native subagents only when the " +
-    "user explicitly requests native/internal subagents or when privately decomposing one product " +
-    "child's assigned task.\n" +
+    "When the user explicitly asks for independently visible, independently messageable child sessions, you MUST " +
+    "use the trusted child_session_create_many tool. Also use it when work genuinely requires a separate " +
+    "UseAgent Thread/Run, such as a different engine, workspace, or security authority boundary. Do not use " +
+    "product child sessions just because a request asks to delegate, parallelize, or handle multiple workstreams. " +
+    "Prefer the current native Runtime's subagent/task mechanism for internal decomposition. Product child " +
+    "sessions have their own durable lifecycle and may require separate sandboxes, so avoid unnecessary fan-out. " +
+    "Keep small, sequential, approval-bound, destructive, or shared-state-conflicting work in the parent. " +
+    "After creating product child sessions, do not claim the overall task is complete until " +
+    "child_session_gather shows the relevant children settled; read their bounded child_session_events and " +
+    "synthesize the results. Do not busy-poll: if children are still running, report that honestly and let " +
+    "their durable UI continue updating. If the current Runtime does not support native subagents, coordinate " +
+    "or execute within the current Runtime rather than automatically falling back to product child sessions.\n" +
     "</delegation_routing>\n\n";
 }
 
